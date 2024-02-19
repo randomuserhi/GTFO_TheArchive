@@ -1,9 +1,12 @@
-﻿using System.Collections.Generic;
+﻿using Player;
+using SNetwork;
+using System.Collections.Generic;
 using System.Linq;
 using TheArchive.Core.Attributes;
 using TheArchive.Core.Attributes.Feature.Settings;
 using TheArchive.Core.FeaturesAPI;
 using TheArchive.Core.FeaturesAPI.Settings;
+using TheArchive.Loader;
 using TheArchive.Utilities;
 using UnityEngine;
 
@@ -61,7 +64,7 @@ namespace TheArchive.Features.Accessibility
 
         public override void OnEnable()
         {
-            if(((eGameStateName)CurrentGameState) == _eGameStateName_InLevel)
+            if (((eGameStateName)CurrentGameState) == _eGameStateName_InLevel)
             {
                 _sentryGunInstances = GameObject.FindObjectsOfType<SentryGunInstance>().ToArray().Where(sgi => sgi.gameObject.name != "SentryGunInstance").ToList();
             }
@@ -79,7 +82,7 @@ namespace TheArchive.Features.Accessibility
                 if (sgi == null)
                     continue;
 
-                if(sgi.IsLocallyOwned && !SharedUtils.SafeIsBot(sgi.Owner.Owner))
+                if (sgi.IsLocallyOwned && !SharedUtils.SafeIsBot(sgi.Owner.Owner))
                 {
                     SentryGunInstance_CheckIsSetup_Patch.ExtResetMarker(sgi);
                     continue;
@@ -105,53 +108,23 @@ namespace TheArchive.Features.Accessibility
             }
         }
 
-        [ArchivePatch(typeof(SentryGunInstance), "CheckIsSetup")]
-        internal static class SentryGunInstance_CheckIsSetup_Patch
+#if IL2CPP
+        public override void Init()
         {
-            private static IValueAccessor<SentryGunInstance, PlaceNavMarkerOnGO> A_PlaceNavMarkerOnGO;
-            
-            public static void Init()
+            LoaderWrapper.ClassInjector.RegisterTypeInIl2Cpp<UpdateMarkerInfo>();
+        }
+#endif
+
+        private class UpdateMarkerInfo : MonoBehaviour
+        {
+            public PlaceNavMarkerOnGO navMarkerPlacer;
+            public InventorySlotAmmo ammo;
+            public SentryGunInstance sentry;
+            public SNet_Player snetPlayer;
+
+            private void Update()
             {
-                A_PlaceNavMarkerOnGO = AccessorBase.GetValueAccessor<SentryGunInstance, PlaceNavMarkerOnGO>("m_navMarkerPlacer");
-            }
-
-            public static void Postfix(SentryGunInstance __instance)
-            {
-                if(!_sentryGunInstances.SafeContains(__instance))
-                    _sentryGunInstances.Add(__instance);
-
-                var navMarkerPlacer = A_PlaceNavMarkerOnGO.Get(__instance);
-
-                var snetPlayer = __instance?.Owner?.Owner;
-                
-                if (snetPlayer == null)
-                    return;
-
-                bool isBot = SharedUtils.SafeIsBot(snetPlayer);
-
-                if (!Settings.ShowBotMarkers && isBot)
-                {
-                    HideMarker(navMarkerPlacer);
-                    return;
-                }
-
-                if(!Settings.ShowRemoteMarkers && !snetPlayer.IsLocal && !isBot)
-                {
-                    HideMarker(navMarkerPlacer);
-                    return;
-                }
-
-                if(!Settings.ShowBotMarkers && isBot)
-                {
-                    HideMarker(navMarkerPlacer);
-                    return;
-                }
-
-                if (!Settings.ShowOwnMarker && !isBot && snetPlayer.IsLocal)
-                {
-                    HideMarker(navMarkerPlacer);
-                    return;
-                }
+                if (!navMarkerPlacer.m_marker.IsVisible) return;
 
                 var col = MARKER_GREEN;
                 var name = string.Empty;
@@ -175,14 +148,76 @@ namespace TheArchive.Features.Accessibility
 
                 if (Settings.ShowSentryArchetype)
                 {
-                    sentryArch = $"<color=white><size={Settings.PlayerNameSize * 100f}%>{__instance.ArchetypeName}</size></color>";
+                    int bulletsInPack = (int)(sentry.m_ammo / ammo.CostOfBullet);
+                    int percentage = (int)(bulletsInPack * ammo.BulletsToRelConv * 100);
+                    sentryArch = $"<color=white><size={Settings.PlayerNameSize * 100f}%>{sentry.ArchetypeName} [{percentage}%]</size></color>";
                 }
-
-                navMarkerPlacer.PlaceMarker(null);
-                navMarkerPlacer.SetMarkerVisible(true);
 
                 navMarkerPlacer.UpdateName(name, sentryArch);
                 navMarkerPlacer.UpdatePlayerColor(col);
+            }
+        }
+
+        [ArchivePatch(typeof(SentryGunInstance), "CheckIsSetup")]
+        internal static class SentryGunInstance_CheckIsSetup_Patch
+        {
+            private static IValueAccessor<SentryGunInstance, PlaceNavMarkerOnGO> A_PlaceNavMarkerOnGO;
+
+            public static void Init()
+            {
+                A_PlaceNavMarkerOnGO = AccessorBase.GetValueAccessor<SentryGunInstance, PlaceNavMarkerOnGO>("m_navMarkerPlacer");
+            }
+
+            public static void Postfix(SentryGunInstance __instance)
+            {
+                if (!_sentryGunInstances.SafeContains(__instance))
+                    _sentryGunInstances.Add(__instance);
+
+                var navMarkerPlacer = A_PlaceNavMarkerOnGO.Get(__instance);
+
+                var snetPlayer = __instance?.Owner?.Owner;
+
+                if (snetPlayer == null)
+                    return;
+
+                bool isBot = SharedUtils.SafeIsBot(snetPlayer);
+
+                if (!Settings.ShowBotMarkers && isBot)
+                {
+                    HideMarker(navMarkerPlacer);
+                    return;
+                }
+
+                if (!Settings.ShowRemoteMarkers && !snetPlayer.IsLocal && !isBot)
+                {
+                    HideMarker(navMarkerPlacer);
+                    return;
+                }
+
+                if (!Settings.ShowBotMarkers && isBot)
+                {
+                    HideMarker(navMarkerPlacer);
+                    return;
+                }
+
+                if (!Settings.ShowOwnMarker && !isBot && snetPlayer.IsLocal)
+                {
+                    HideMarker(navMarkerPlacer);
+                    return;
+                }
+
+                UpdateMarkerInfo info = navMarkerPlacer.gameObject.GetComponent<UpdateMarkerInfo>();
+                if (info == null)
+                {
+                    info = navMarkerPlacer.gameObject.AddComponent<UpdateMarkerInfo>();
+                }
+                info.ammo = PlayerBackpackManager.GetBackpack(snetPlayer).AmmoStorage.GetInventorySlotAmmo(AmmoType.Class);
+                info.navMarkerPlacer = navMarkerPlacer;
+                info.sentry = __instance;
+                info.snetPlayer = snetPlayer;
+
+                navMarkerPlacer.PlaceMarker(null);
+                navMarkerPlacer.SetMarkerVisible(true);
             }
 
             public static void ExtResetMarker(SentryGunInstance sentryGunInstance)
