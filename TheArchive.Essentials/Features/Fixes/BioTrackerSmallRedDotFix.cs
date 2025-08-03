@@ -1,4 +1,5 @@
 ﻿using Enemies;
+using Gear;
 using TheArchive.Core.Attributes;
 using TheArchive.Core.FeaturesAPI;
 using static TheArchive.Utilities.Utils;
@@ -7,8 +8,7 @@ namespace TheArchive.Features.Fixes;
 
 [EnableFeatureByDefault]
 [RundownConstraint(RundownFlags.RundownSix, RundownFlags.Latest)]
-internal class BioTrackerSmallRedDotFix : Feature
-{
+internal class BioTrackerSmallRedDotFix : Feature {
     public override string Name => "Bio Tracker Small Red Dots";
 
     public override FeatureGroup Group => FeatureGroups.Fixes;
@@ -18,11 +18,11 @@ internal class BioTrackerSmallRedDotFix : Feature
 #if IL2CPP
 
     [ArchivePatch(typeof(EnemyAgent), nameof(EnemyAgent.ScannerData), patchMethodType: ArchivePatch.PatchMethodType.Setter)]
-    internal static class EnemyAgent_ScannerData_Patch
-    {
-        public static void Postfix(EnemyAgent __instance)
-        {
+    internal static class EnemyAgent_ScannerData_Patch {
+        public static void Postfix(EnemyAgent __instance) {
             __instance.m_hasDirtyScannerColor = true;
+            EnemyScannerDataObject scannerData = __instance.ScannerData;
+            scannerData.m_soundIndex = 0;
         }
     }
 
